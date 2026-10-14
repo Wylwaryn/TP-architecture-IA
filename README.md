@@ -53,9 +53,12 @@ du lexical en relisant chaque paire (requête, document) ensemble.
 Prérequis : Docker + Docker Compose.
 
 ```bash
-cp .env.example .env
 docker compose up --build
 ```
+
+Aucune configuration préalable requise : les valeurs par défaut sont dans le
+`docker-compose.yml`. Le fichier `.env` est **optionnel** (uniquement pour surcharger
+un paramètre, cf. `.env.example`).
 
 Au premier lancement, `ollama-init` télécharge `bge-m3` (~1.2 Go) et `qwen3.5:4b` (~3.3 Go),
 puis `indexer` calcule les embeddings et remplit Elasticsearch (s'exécute une fois et s'arrête).

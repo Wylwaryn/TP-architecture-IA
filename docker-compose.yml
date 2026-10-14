@@ -49,7 +49,7 @@ services:
         condition: service_healthy
     environment:
       - OLLAMA_HOST=http://ollama:11434
-    entrypoint: ["/bin/sh", "-c", "ollama pull ${EMBED_MODEL} && ollama pull ${RERANK_MODEL}"]
+    entrypoint: ["/bin/sh", "-c", "ollama pull ${EMBED_MODEL:-bge-m3} && ollama pull ${RERANK_MODEL:-qwen3.5:4b}"]
     restart: "no"
 
   # ----------------------------------------------------------------------- #
@@ -58,7 +58,13 @@ services:
   indexer:
     build: ./indexer
     container_name: ia_indexer
-    env_file: .env
+    environment:
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - ES_URL=${ES_URL:-http://elasticsearch:9200}
+      - EMBED_MODEL=${EMBED_MODEL:-bge-m3}
+      - EMBED_DIM=${EMBED_DIM:-1024}
+      - N_CLUSTERS=${N_CLUSTERS:-5}
+      - DATA_FILE=${DATA_FILE:-/data/objet_consultations_1000.txt}
     volumes:
       - ./data:/data:ro
     depends_on:
@@ -74,7 +80,13 @@ services:
   backend:
     build: ./backend
     container_name: ia_backend
-    env_file: .env
+    environment:
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - ES_URL=${ES_URL:-http://elasticsearch:9200}
+      - EMBED_MODEL=${EMBED_MODEL:-bge-m3}
+      - RERANK_MODEL=${RERANK_MODEL:-qwen3.5:4b}
+      - N_CLUSTERS=${N_CLUSTERS:-5}
+      - N_PROBE=${N_PROBE:-1}
     ports:
       - "8000:8000"
     depends_on:
