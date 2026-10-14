@@ -1,0 +1,100 @@
+services:
+  # ----------------------------------------------------------------------- #
+  # Base de données / moteur de recherche
+  # ----------------------------------------------------------------------- #
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: ia_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q status"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  # ----------------------------------------------------------------------- #
+  # Modèles IA (serveur Ollama + pull des modèles)
+  # ----------------------------------------------------------------------- #
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ia_ollama
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    # --- GPU NVIDIA (optionnel : nécessite nvidia-container-toolkit / WSL2 GPU) ---
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: ia_ollama_init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "ollama pull ${EMBED_MODEL} && ollama pull ${RERANK_MODEL}"]
+    restart: "no"
+
+  # ----------------------------------------------------------------------- #
+  # Script d'indexation (one-shot : embed -> K-Means -> Elasticsearch)
+  # ----------------------------------------------------------------------- #
+  indexer:
+    build: ./indexer
+    container_name: ia_indexer
+    env_file: .env
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # ----------------------------------------------------------------------- #
+  # Backend API (FastAPI)
+  # ----------------------------------------------------------------------- #
+  backend:
+    build: ./backend
+    container_name: ia_backend
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+      indexer:
+        condition: service_completed_successfully
+
+  # ----------------------------------------------------------------------- #
+  # Frontend (React servi par nginx, proxy /api -> backend)
+  # ----------------------------------------------------------------------- #
+  frontend:
+    build: ./frontend
+    container_name: ia_frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  ollama_models:
