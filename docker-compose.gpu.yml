@@ -1,0 +1,12 @@
+# Override GPU : ajoute l'accès GPU NVIDIA au conteneur Ollama.
+# Activé automatiquement par start.sh / start.ps1 si un GPU NVIDIA est détecté.
+# Usage manuel : docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

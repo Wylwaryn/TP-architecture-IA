@@ -38,9 +38,9 @@ header h1 { margin: 0; font-size: 1.8rem; }
 .line { font-size: 1.02rem; line-height: 1.4; }
 .badges { display: flex; gap: .5rem; margin-top: .6rem; flex-wrap: wrap; }
 .badge { font-size: .75rem; padding: .2rem .6rem; border-radius: 999px; font-weight: 600; }
-.badge.cluster { background: #312e81; color: #c7d2fe; }
-.badge.rerank  { background: #064e3b; color: #6ee7b7; }
-.badge.bm25    { background: #3f2d1a; color: #fcd34d; }
+.badge.index  { background: #312e81; color: #c7d2fe; }
+.badge.rerank { background: #064e3b; color: #6ee7b7; }
+.badge.search { background: #3f2d1a; color: #fcd34d; }
 
 .bar { height: 6px; background: #0b1220; border-radius: 999px; margin-top: .6rem; overflow: hidden; }
 .fill { height: 100%; background: linear-gradient(90deg, #22d3ee, #34d399); }

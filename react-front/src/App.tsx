@@ -1,23 +1,38 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
+
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+interface Result {
+  index: string;
+  line: string;
+  search_score: number;
+  rerank_score: number;
+}
+interface SearchResponse {
+  query: string;
+  indices: string[];
+  candidates: number;
+  results: Result[];
+}
 
 export default function App() {
   const [query, setQuery] = useState("");
-  const [data, setData] = useState(null);
+  const [data, setData] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
-  async function runSearch(e) {
+  async function runSearch(e: FormEvent) {
     e.preventDefault();
     const q = query.trim();
     if (!q) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const res = await fetch(`${API_URL}/search?q=${encodeURIComponent(q)}`);
       if (!res.ok) throw new Error(`Erreur ${res.status}`);
-      setData(await res.json());
+      setData((await res.json()) as SearchResponse);
     } catch (err) {
-      setError(err.message);
+      setError(err instanceof Error ? err.message : String(err));
       setData(null);
     } finally {
       setLoading(false);
@@ -29,7 +44,7 @@ export default function App() {
       <header>
         <h1>🔎 IA Search — Consultations</h1>
         <p className="subtitle">
-          Recherche hiérarchique&nbsp;: embedding&nbsp;→ cluster&nbsp;→ BM25&nbsp;→ rerank LLM
+          clusters (knn) → recherche hybride → rerank LLM (logprobs)
         </p>
       </header>
 
@@ -41,7 +56,7 @@ export default function App() {
           onChange={(e) => setQuery(e.target.value)}
         />
         <button type="submit" disabled={loading}>
-          {loading ? "…" : "Rechercher"}
+          {loading ? "…" : "Search"}
         </button>
       </form>
 
@@ -50,19 +65,19 @@ export default function App() {
       {data && (
         <section className="results">
           <p className="meta">
-            {data.results.length} résultat(s) · cluster(s) sondé(s)&nbsp;:{" "}
-            <b>{data.clusters.join(", ")}</b> · {data.candidates} candidats BM25
+            {data.results.length} résultat(s) · index&nbsp;: <b>{data.indices.join(", ")}</b> ·{" "}
+            {data.candidates} candidats
           </p>
-          {data.results.map((r) => (
-            <article key={r.line_id} className="card">
+          {data.results.map((r, i) => (
+            <article key={i} className="card">
               <div className="line">{r.line}</div>
               <div className="badges">
-                <span className="badge cluster">cluster {r.cluster_id}</span>
-                <span className="badge rerank" title="Score de pertinence du reranker LLM">
+                <span className="badge index">{r.index}</span>
+                <span className="badge rerank" title="Score de pertinence (rerank logprobs)">
                   rerank {(r.rerank_score * 100).toFixed(0)}%
                 </span>
-                <span className="badge bm25" title="Score lexical BM25">
-                  BM25 {r.bm25_score}
+                <span className="badge search" title="Score recherche hybride (knn + BM25)">
+                  hybride {r.search_score}
                 </span>
               </div>
               <div className="bar">

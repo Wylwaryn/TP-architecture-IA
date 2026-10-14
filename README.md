@@ -1,94 +1,86 @@
 # IA Search — Moteur de recherche de consultations
 
-Projet d'évaluation « Architectures IA ». Moteur de recherche sémantique sur un corpus
-de **1000 intitulés de marchés publics**, avec une architecture de **recherche hiérarchique** :
-embedding → routage par cluster → BM25 → reranking.
+Projet d'évaluation « Architectures IA ». Recherche sémantique sur un corpus de **1000
+intitulés de marchés publics**, en **recherche hiérarchique** : embedding → cluster →
+recherche hybride → reranking. Suit les TD1 à TD3 du module.
 
 ## Architecture
 
 ```
-                 ┌──────────── INDEXATION (one-shot) ────────────┐
- dataset ──▶ Ollama (bge-m3) ──▶ embeddings ──▶ K-Means ──▶ Elasticsearch
-                                                              ├─ index "clusters"  (centroïdes, dense_vector)
-                                                              └─ index "data_0..4" (documents, BM25 FR)
+            ┌──────────────── INDEXATION (index_data) ────────────────┐
+ dataset ─▶ Ollama (bge-m3) ─▶ embeddings ─▶ K-Means ─▶ Elasticsearch
+                                                         ├─ data_clusters  { embedding, data_index }
+                                                         └─ data_1 … data_5 { embedding, line }
 
-                 ┌──────────────── RECHERCHE ────────────────────┐
- React ──▶ FastAPI ──▶ 1. embed requête (bge-m3)
-                       2. kNN sur "clusters"      → cluster le plus proche
-                       3. BM25 sur "data_{k}"     → candidats
-                       4. rerank LLM (qwen3.5:4b) → scores de pertinence  (parallèle)
-                       5. tri + top_k             → React
+            ┌──────────────────── RECHERCHE ──────────────────────────┐
+ React ─▶ FastAPI ─▶ 1. embed requête (bge-m3)
+                     2. knn sur "data_clusters"   → data_index du cluster le plus proche
+                     3. recherche HYBRIDE (knn + BM25) dans data_X
+                     4. rerank LLM par logprobs (qwen3.5), en parallèle
+                     5. tri par pertinence → React
 ```
 
-**Pourquoi ce design ?** L'embedding ne sert qu'à **router** la requête vers le bon
-cluster (kNN sur 5 centroïdes, pas sur 1000 vecteurs → ça passe à l'échelle, principe
-des index IVF de FAISS). La recherche fine est **lexicale (BM25)**, excellente sur les
-termes exacts, puis le **reranker** (cross-encodeur sémantique) corrige les angles morts
-du lexical en relisant chaque paire (requête, document) ensemble.
+L'embedding **route** la requête vers un cluster (knn sur les centroïdes). La recherche
+fine est **hybride** (vectorielle + BM25) dans l'index du cluster. Le **rerank** réordonne
+les candidats par pertinence sémantique.
 
 ## Composants
 
-| Service | Rôle | Techno |
+| Dossier / service | Rôle | Techno |
 |---|---|---|
+| `index_data` | Script d'indexation (one-shot) | Python (uv), scikit-learn |
+| `fastapi-backend` | API de recherche + rerank | FastAPI (uv), debugpy |
+| `react-front` | Interface de recherche | React **TypeScript** (Vite) + nginx |
 | `elasticsearch` | Base vectorielle + BM25 | Elasticsearch 8.12 |
-| `ollama` + `ollama-init` | Modèles IA (embedding + rerank) | Ollama |
-| `indexer` | Script Python d'indexation | Python, scikit-learn |
-| `backend` | API de recherche | FastAPI |
-| `frontend` | Interface de recherche | React (Vite) + nginx |
+| `ollama` / `ollama-init` | Modèles embedding + rerank | Ollama |
 
-### Choix des modèles
+### Modèles & méthode
 
-- **Embedding : `bge-m3`** (1024 dims, multilingue, très bon en français). Le mapping
-  Elasticsearch `dense_vector` est donc en `dims: 1024`, `similarity: cosine`.
-- **Rerank : `qwen3.5:4b` en *pointwise LLM reranking***. ⚠️ **Ollama n'a pas d'endpoint
-  de reranking natif** (feature request [#3368](https://github.com/ollama/ollama/issues/3368),
-  toujours ouverte). Les cross-encodeurs type `bge-reranker` ont une tête de classification
-  qu'Ollama ne sait pas servir. On utilise donc un LLM instruct comme juge de pertinence :
-  pour chaque paire (requête, document) il renvoie un score 0–10 (normalisé en 0–1).
-  Technique reconnue (RankGPT *pointwise*). Les appels sont lancés **en parallèle**
-  (`asyncio.gather`) pour limiter la latence.
+- **Embedding** : `bge-m3` (1024 dims) → `dense_vector` cosinus dans Elasticsearch.
+- **Rerank** : LLM `qwen3.5` via Ollama, **scoring par logprobs** (TD3) : on contraint la
+  réponse à `yes`/`no`, on lit les logprobs du token de réponse, on calcule
+  `p_yes / (p_yes + p_no)`, puis tri décroissant. Appels **en parallèle** (`asyncio.gather`).
+  Ollama n'ayant pas d'endpoint de rerank natif, c'est la méthode attendue par le cours.
 
 ## Démarrage
 
-Prérequis : Docker + Docker Compose.
+Prérequis : Docker + Docker Compose. Aucune configuration préalable.
 
 ```bash
+# Détection automatique du GPU (GPU si NVIDIA dispo, sinon CPU) :
+./start.sh          # Linux / macOS / Git Bash
+./start.ps1         # Windows PowerShell
+
+# ou directement (CPU, portable partout) :
 docker compose up --build
 ```
 
-Aucune configuration préalable requise : les valeurs par défaut sont dans le
-`docker-compose.yml`. Le fichier `.env` est **optionnel** (uniquement pour surcharger
-un paramètre, cf. `.env.example`).
-
-Au premier lancement, `ollama-init` télécharge `bge-m3` (~1.2 Go) et `qwen3.5:4b` (~3.3 Go),
-puis `indexer` calcule les embeddings et remplit Elasticsearch (s'exécute une fois et s'arrête).
+Au premier lancement : téléchargement des modèles (`bge-m3`, `qwen3.5:4b`) par `ollama-init`,
+puis indexation automatique par `index_data` (s'exécute une fois et s'arrête).
 
 - **Frontend** : http://localhost:3000
-- **API (docs Swagger)** : http://localhost:8000/docs
+- **API (Swagger)** : http://localhost:8000/docs
 - **Elasticsearch** : http://localhost:9200
+- **Debug backend** (debugpy) : port 5678 (Remote Attach, cf. TD2-3)
 
-### Exemple d'appel API
+### Exemple d'appel
 
 ```bash
 curl "http://localhost:8000/search?q=rénovation+toiture+école&top_k=5"
 ```
 
-### Variante GPU (rapide)
+### GPU
 
-Pour utiliser l'**Ollama natif de l'hôte** (GPU) au lieu du conteneur, mettre dans `.env` :
-```
-OLLAMA_BASE_URL=http://host.docker.internal:11434
-```
-(Les modèles doivent alors être présents côté hôte : `ollama pull bge-m3 && ollama pull qwen3.5:4b`.)
-Pour le GPU *dans* le conteneur Ollama : décommenter le bloc `deploy` de `docker-compose.yml`.
+`start.sh` / `start.ps1` détectent `nvidia-smi` et activent `docker-compose.gpu.yml`
+(accès GPU du conteneur Ollama) si un GPU NVIDIA est présent. Sinon, exécution sur CPU.
+Pour pointer vers l'Ollama **natif** de l'hôte : `OLLAMA_BASE_URL=http://host.docker.internal:11434` dans `.env`.
 
 ## Développement (hors Docker)
 
 ```bash
-# Elasticsearch + Ollama doivent tourner (localhost:9200 / :11434)
-cd indexer  && pip install -r requirements.txt && python index.py
-cd backend  && pip install -r requirements.txt && uvicorn main:app --reload
-cd frontend && npm install && npm run dev      # http://localhost:5173
+cd index_data      && uv run python main.py        # Elasticsearch + Ollama doivent tourner
+cd fastapi-backend && uv run uvicorn main:app --reload
+cd react-front     && npm install && npm run dev    # http://localhost:5173
 ```
 
 ## Paramètres de recherche (`/search`)
@@ -96,6 +88,6 @@ cd frontend && npm install && npm run dev      # http://localhost:5173
 | Param | Défaut | Description |
 |---|---|---|
 | `q` | — | Requête (obligatoire) |
-| `probe` | 1 | Nombre de clusters sondés par kNN |
-| `candidates` | 20 | Candidats BM25 récupérés avant rerank |
+| `probe` | 1 | Nombre de clusters sondés (knn sur data_clusters) |
+| `candidates` | 20 | Candidats de la recherche hybride avant rerank |
 | `top_k` | 10 | Nombre de résultats renvoyés |
