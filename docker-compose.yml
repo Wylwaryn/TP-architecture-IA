@@ -23,6 +23,9 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
+    environment:
+      # Exécute les requêtes de rerank réellement en parallèle (cf. TD4, KV-cache).
+      - OLLAMA_NUM_PARALLEL=4
     volumes:
       - ollama_models:/root/.ollama
     ports:
